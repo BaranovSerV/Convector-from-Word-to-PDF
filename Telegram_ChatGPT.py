@@ -1,31 +1,91 @@
 import telebot
-import openai
+from telebot import types
+import base64
+import requests
+import time
 
-# Токен вашего бота, который вы получили от BotFather в Telegram
-TOKEN = '6718122659:AAETeWZjwaEa6d5stXF_tNUwqSuWNA4A6bo'
+API_TOKEN = '6718122659:AAETeWZjwaEa6d5stXF_tNUwqSuWNA4A6bo'
+CONVERTIO_API_KEY = '3ffa2f477818bdc3dd362f37e16b9172'
+CONVERTIO_API_URL = 'https://api.convertio.co/convert'
 
+admins = [776294107]
 
-bot = telebot.TeleBot(TOKEN)
+bot = telebot.TeleBot(API_TOKEN)
 
-# Установка ключа API для доступа к OpenAI GPT-3
-openai.api_key = 'Ysk-proj-r0RIAVkHFByoLovaX9HlT3BlbkFJWndAVkiR8CQzO2lH2XMe'
-
-# Обработчик команды /start
+"""Работа конвектора PDF"""
 @bot.message_handler(commands=['start'])
-def start_message(message):
-    bot.send_message(message.chat.id, "Привет! Я ChatGPT бот. Отправь мне сообщение, и я сгенерирую текст на основе вашего ввода.")
+def ask_for_document(message):
+    bot.reply_to(message, "Отправь мне файл в формате Word, и я конвертирую его в PDF.")
 
-# Обработчик входящих сообщений
-@bot.message_handler(func=lambda message: True)
-def generate_text(message):
-    user_input = message.text
-    # Генерация ответа от модели ChatGPT
-    response = openai.Completion.create(
-        engine="text-davinci-003",
-        prompt=user_input,
-        max_tokens=50
-    )
-    bot.send_message(message.chat.id, response.choices[0].text.strip())
+@bot.message_handler(content_types=['document'])
+def handle_document(message):
+    try:
+        file_id = message.document.file_id
+        file_info = bot.get_file(file_id)
+        file_path = file_info.file_path
+        file_url = f"https://api.telegram.org/file/bot{API_TOKEN}/{file_path}"
 
-# Запуск бота
-bot.polling()
+        # Загрузка файла с сервера Telegram
+        file_content = requests.get(file_url).content
+
+        # Подготовка данных для загрузки на Convertio
+        payload = {
+            'apikey': CONVERTIO_API_KEY,
+            'input': 'base64',
+            'file': base64.b64encode(file_content).decode('utf-8'),
+            'filename': message.document.file_name,
+            'outputformat': 'pdf'
+        }
+
+        # Загрузка файла на Convertio
+        response = requests.post(CONVERTIO_API_URL, json=payload)
+        conversion_data = response.json()
+
+        if conversion_data['status'] == 'ok':
+            conversion_id = conversion_data['data']['id']
+            bot.reply_to(message, f"Файл загружен...")
+
+            # Ожидание завершения конвертации
+            while True:
+                status_response = requests.get(f"{CONVERTIO_API_URL}/{conversion_id}/status")
+                status_data = status_response.json()
+
+                if status_data['status'] != 'ok':
+                    bot.reply_to(message, f"Ошибка при проверке статуса: {status_data}")
+                    return
+
+                if status_data['data']['step'] == 'finish':
+                    break
+                time.sleep(3)
+
+            # Получение ссылки на конвертированный файл
+            result_url = status_data['data']['output']['url']
+
+            # Вывод отладочной информации
+            #bot.reply_to(message, f"Отладочная информация: {json.dumps(status_data, indent=2)}")
+
+            # Скачивание конвертированного файла и отправка пользователю
+            pdf_content = requests.get(result_url).content
+            bot.send_document(message.chat.id, (f"{message.document.file_name.split('.')[0]}.pdf", pdf_content))
+        else:
+            send_long_message(message.chat.id, f"Ошибка при конвертации: {conversion_data['error']}")
+    except Exception as e:
+        send_long_message(message.chat.id, f"Произошла ошибка: {str(e)}")
+
+def send_long_message(chat_id, text):
+    """Разбивает длинное сообщение на несколько более коротких и отправляет их по отдельности."""
+    max_length = 4096  # Максимальная длина сообщения в Telegram
+    for i in range(0, len(text), max_length):
+        bot.send_message(chat_id, text[i:i+max_length])
+
+# Запускаем бота
+while True:
+    try:
+        bot.polling(none_stop=True)
+    except Exception as e:
+        print(f"Ошибка при запуске бота: {e}")
+        for admin_id in admins:
+            error_bot = f'''{str(e)}'''
+            formatted_code = f"<pre><code>{error_bot}</code></pre>"
+            bot.send_message(admin_id, f"Ошибка при запуске бота:{formatted_code}", parse_mode='HTML')
+        time.sleep(5)  # Перезапускаем бота через 5 секунд, если произошла ошибка

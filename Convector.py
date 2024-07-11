@@ -4,11 +4,11 @@ import base64
 import requests
 import time
 
-API_TOKEN = '6718122659:AAETeWZjwaEa6d5stXF_tNUwqSuWNA4A6bo'
-CONVERTIO_API_KEY = '3ffa2f477818bdc3dd362f37e16b9172'
+API_TOKEN = 'Your API TOKEN'
+CONVERTIO_API_KEY = 'Your API KEY'
 CONVERTIO_API_URL = 'https://api.convertio.co/convert'
 
-admins = [776294107]
+admins = [] # administrator's ID
 
 bot = telebot.TeleBot(API_TOKEN)
 
